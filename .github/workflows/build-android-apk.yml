@@ -1,0 +1,62 @@
+
+name: DARK MYRAA Android Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Extract Project ZIP
+        run: |
+          mkdir -p source
+          unzip -q DARK-MYRAA-modified-project.zip -d source
+
+          for i in 1 2 3; do
+            find source -type f -name '*.zip' | while read f; do
+              mkdir -p "${f%.zip}-extracted"
+              unzip -oq "$f" -d "${f%.zip}-extracted"
+            done
+          done
+
+      - name: Find Android Project
+        id: project
+        run: |
+          WRAPPER=$(find source -type f -name gradlew | head -n 1)
+          if [ -z "$WRAPPER" ]; then
+            echo "Gradle wrapper not found"
+            exit 1
+          fi
+          echo "dir=$(dirname "$WRAPPER")" >> "$GITHUB_OUTPUT"
+
+      - name: Build Debug APK
+        run: |
+          cd "${{ steps.project.outputs.dir }}"
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Upload DARK MYRAA APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: DARK-MYRAA-APK
+          path: |
+            source/**/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          
