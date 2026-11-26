@@ -1,62 +1,70 @@
-
-name: DARK MYRAA Android Build
+name: DARK MYRAA Android APK Build
 
 on:
   workflow_dispatch:
   push:
-    branches:
-      - main
+    branches: [main]
 
 permissions:
   contents: read
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
 
     steps:
-      - name: Checkout Repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Java
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup Java 21
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '21'
 
-      - name: Extract Project ZIP
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK Components
+        shell: pwsh
         run: |
-          mkdir -p source
-          unzip -q DARK-MYRAA-modified-project.zip -d source
+          & "$env:ANDROID_HOME\cmdline-tools\latest\bin\sdkmanager.bat" "platforms;android-35" "build-tools;35.0.0"
 
-          for i in 1 2 3; do
-            find source -type f -name '*.zip' | while read f; do
-              mkdir -p "${f%.zip}-extracted"
-              unzip -oq "$f" -d "${f%.zip}-extracted"
-            done
-          done
-
-      - name: Find Android Project
-        id: project
+      - name: Extract Existing Project
+        shell: pwsh
         run: |
-          WRAPPER=$(find source -type f -name gradlew | head -n 1)
-          if [ -z "$WRAPPER" ]; then
-            echo "Gradle wrapper not found"
-            exit 1
-          fi
-          echo "dir=$(dirname "$WRAPPER")" >> "$GITHUB_OUTPUT"
+          Expand-Archive DARK-MYRAA-modified-project.zip bundle
+          $zip = Get-ChildItem bundle -Recurse -Filter "MYRAA-Mobile-SKSEFA-HACKINGCYBER-source.zip" | Select-Object -First 1
+          if (!$zip) { throw "Source ZIP not found" }
+          Expand-Archive $zip.FullName project
 
-      - name: Build Debug APK
+      - name: Remove Missing Evelyn Dependency
+        shell: pwsh
         run: |
-          cd "${{ steps.project.outputs.dir }}"
-          chmod +x gradlew
-          ./gradlew assembleDebug
+          $script = "project/scripts/build-android.ps1"
+          $lines = Get-Content $script
+          $lines = $lines | Where-Object { $_ -notmatch "Copy-Item.*assets.*characters.*evelyn" }
+          Set-Content -Path $script -Value $lines
 
-      - name: Upload DARK MYRAA APK
+      - name: Install Dependencies
+        working-directory: project
+        run: npm ci
+
+      - name: Build DARK MYRAA APK
+        working-directory: project
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -File scripts/build-android.ps1 -SdkRoot $env:ANDROID_HOME -JavaRoot $env:JAVA_HOME
+
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: DARK-MYRAA-APK
-          path: |
-            source/**/build/outputs/apk/debug/*.apk
+          name: DARK-MYRAA-DEBUG-APK
+          path: project/artifacts/android/*.apk
           if-no-files-found: error
           
