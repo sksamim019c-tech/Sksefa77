@@ -30,34 +30,19 @@ jobs:
           java-version: '21'
 
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
         with:
-          accept-android-sdk-licenses: false
+          packages: 'platform-tools'
+          accept-android-sdk-licenses: true
+          log-accepted-android-sdk-licenses: false
 
-      - name: Accept Android SDK Licenses and Install Components
+      - name: Install Android SDK Components
         shell: pwsh
         run: |
-          $manager = Get-ChildItem "$env:ANDROID_HOME\cmdline-tools" -Filter "sdkmanager.bat" -Recurse |
-            Select-Object -First 1
-
-          if (!$manager) {
-            throw "SDK Manager not found"
-          }
-
-          $sdk = $manager.FullName
-
-          $answers = 1..40 | ForEach-Object { "y" }
-
-          $answers | & $sdk --licenses
+          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
           if ($LASTEXITCODE -ne 0) {
-            throw "SDK license acceptance failed"
-          }
-
-          & $sdk "platform-tools" "platforms;android-35" "build-tools;35.0.0"
-
-          if ($LASTEXITCODE -ne 0) {
-            throw "SDK components installation failed"
+            throw "Android SDK installation failed"
           }
 
       - name: Extract Existing Project
@@ -86,7 +71,7 @@ jobs:
           }
 
           if (!(Test-Path "project/package.json")) {
-            throw "Project package.json not found"
+            throw "package.json not found"
           }
 
       - name: Remove Missing Evelyn Dependency
@@ -108,10 +93,10 @@ jobs:
           npm ci
 
           if ($LASTEXITCODE -ne 0) {
-            throw "NPM dependency installation failed"
+            throw "NPM installation failed"
           }
 
-      - name: Build DARK MYRAA Android APK
+      - name: Build DARK MYRAA APK
         working-directory: project
         shell: pwsh
         run: |
@@ -125,12 +110,12 @@ jobs:
         id: apk
         shell: pwsh
         run: |
-          $apk = Get-ChildItem "project/artifacts/android" -Recurse -Filter "*.apk" |
+          $apk = Get-ChildItem "project" -Recurse -Filter "*.apk" |
             Sort-Object LastWriteTime -Descending |
             Select-Object -First 1
 
           if (!$apk) {
-            throw "No APK generated in project/artifacts/android"
+            throw "APK was not generated"
           }
 
           New-Item -ItemType Directory -Force -Path "output" | Out-Null
