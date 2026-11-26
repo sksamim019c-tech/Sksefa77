@@ -28,11 +28,7 @@ jobs:
           java-version: '21'
 
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v4
-        with:
-          accept-android-sdk-licenses: true
-          log-accepted-android-sdk-licenses: false
-          packages: 'platform-tools'
+        uses: android-actions/setup-android@v3
 
       - name: Install Android SDK Components
         shell: pwsh
@@ -43,19 +39,21 @@ jobs:
             throw "Android SDK Manager not found"
           }
 
-          & $sdkmanager.FullName "platforms;android-35" "build-tools;35.0.0"
+          & $sdkmanager.FullName --licenses
 
           if ($LASTEXITCODE -ne 0) {
-            throw "Android SDK components installation failed"
+            throw "SDK license acceptance failed"
+          }
+
+          & $sdkmanager.FullName "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Android SDK installation failed"
           }
 
       - name: Extract Existing Project
         shell: pwsh
         run: |
-          if (!(Test-Path "DARK-MYRAA-modified-project.zip")) {
-            throw "Modified project ZIP not found"
-          }
-
           Expand-Archive DARK-MYRAA-modified-project.zip bundle
 
           $zip = Get-ChildItem bundle -Recurse -Filter "MYRAA-Mobile-SKSEFA-HACKINGCYBER-source.zip" | Select-Object -First 1
@@ -96,27 +94,32 @@ jobs:
           pwsh -NoProfile -File scripts/build-android.ps1 -SdkRoot $env:ANDROID_HOME -JavaRoot $env:JAVA_HOME
 
           if ($LASTEXITCODE -ne 0) {
-            throw "DARK MYRAA APK build failed"
+            throw "DARK MYRAA build failed"
           }
 
-      - name: Find APK
+      - name: Find and Prepare APK
         id: apk
         shell: pwsh
         run: |
-          $apk = Get-ChildItem project -Recurse -Filter "*.apk" |
-            Where-Object { $_.FullName -match "debug" } |
+          $apk = Get-ChildItem "project/artifacts/android" -Recurse -Filter "*.apk" |
+            Sort-Object LastWriteTime -Descending |
             Select-Object -First 1
 
           if (!$apk) {
-            throw "Debug APK not found"
+            throw "No APK was generated"
           }
 
-          "path=$($apk.FullName)" >> $env:GITHUB_OUTPUT
+          $output = "DARK-MYRAA.apk"
+          Copy-Item $apk.FullName $output -Force
+
+          "path=$output" >> $env:GITHUB_OUTPUT
+
+          Write-Host "APK successfully found: $($apk.FullName)"
 
       - name: Upload DARK MYRAA APK
         uses: actions/upload-artifact@v4
         with:
-          name: DARK-MYRAA-DEBUG-APK
+          name: DARK-MYRAA-APK
           path: ${{ steps.apk.outputs.path }}
           if-no-files-found: error
           retention-days: 30
