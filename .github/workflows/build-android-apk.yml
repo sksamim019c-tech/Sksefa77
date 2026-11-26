@@ -3,23 +3,25 @@ name: DARK MYRAA Android APK Build
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches:
+      - main
 
 permissions:
   contents: read
 
 jobs:
   build:
+    name: Build DARK MYRAA
     runs-on: windows-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: '22'
 
       - name: Setup Java 21
         uses: actions/setup-java@v5
@@ -29,75 +31,97 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          accept-android-sdk-licenses: false
 
-      - name: Install Android SDK Components
+      - name: Accept Android SDK Licenses and Install Components
         shell: pwsh
         run: |
-          $sdkmanager = Get-ChildItem "$env:ANDROID_HOME\cmdline-tools" -Filter "sdkmanager.bat" -Recurse | Select-Object -First 1
+          $manager = Get-ChildItem "$env:ANDROID_HOME\cmdline-tools" -Filter "sdkmanager.bat" -Recurse |
+            Select-Object -First 1
 
-          if (!$sdkmanager) {
-            throw "Android SDK Manager not found"
+          if (!$manager) {
+            throw "SDK Manager not found"
           }
 
-          & $sdkmanager.FullName --licenses
+          $sdk = $manager.FullName
+
+          $answers = 1..40 | ForEach-Object { "y" }
+
+          $answers | & $sdk --licenses
 
           if ($LASTEXITCODE -ne 0) {
             throw "SDK license acceptance failed"
           }
 
-          & $sdkmanager.FullName "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+          & $sdk "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
           if ($LASTEXITCODE -ne 0) {
-            throw "Android SDK installation failed"
+            throw "SDK components installation failed"
           }
 
       - name: Extract Existing Project
         shell: pwsh
         run: |
-          Expand-Archive DARK-MYRAA-modified-project.zip bundle
-
-          $zip = Get-ChildItem bundle -Recurse -Filter "MYRAA-Mobile-SKSEFA-HACKINGCYBER-source.zip" | Select-Object -First 1
-
-          if (!$zip) {
-            throw "Source ZIP not found"
+          if (!(Test-Path "DARK-MYRAA-modified-project.zip")) {
+            throw "Project ZIP not found"
           }
 
-          Expand-Archive $zip.FullName project
+          Expand-Archive "DARK-MYRAA-modified-project.zip" "bundle" -Force
 
-      - name: Check Build Script
+          $zip = Get-ChildItem "bundle" -Recurse -Filter "MYRAA-Mobile-SKSEFA-HACKINGCYBER-source.zip" |
+            Select-Object -First 1
+
+          if (!$zip) {
+            throw "Original source ZIP not found"
+          }
+
+          Expand-Archive $zip.FullName "project" -Force
+
+      - name: Check Android Build Script
         shell: pwsh
         run: |
           if (!(Test-Path "project/scripts/build-android.ps1")) {
             throw "Android build script not found"
           }
 
+          if (!(Test-Path "project/package.json")) {
+            throw "Project package.json not found"
+          }
+
       - name: Remove Missing Evelyn Dependency
         shell: pwsh
         run: |
           $script = "project/scripts/build-android.ps1"
-          $lines = Get-Content $script
+          $content = Get-Content $script
 
-          $lines = $lines | Where-Object {
+          $content = $content | Where-Object {
             $_ -notmatch "Copy-Item.*assets.*characters.*evelyn"
           }
 
-          Set-Content -Path $script -Value $lines
+          Set-Content -Path $script -Value $content
 
-      - name: Install Dependencies
-        working-directory: project
-        run: npm ci
-
-      - name: Build DARK MYRAA APK
+      - name: Install Project Dependencies
         working-directory: project
         shell: pwsh
         run: |
-          pwsh -NoProfile -File scripts/build-android.ps1 -SdkRoot $env:ANDROID_HOME -JavaRoot $env:JAVA_HOME
+          npm ci
 
           if ($LASTEXITCODE -ne 0) {
-            throw "DARK MYRAA build failed"
+            throw "NPM dependency installation failed"
           }
 
-      - name: Find and Prepare APK
+      - name: Build DARK MYRAA Android APK
+        working-directory: project
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/build-android.ps1 -SdkRoot $env:ANDROID_HOME -JavaRoot $env:JAVA_HOME
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Android APK build failed"
+          }
+
+      - name: Find Generated APK
         id: apk
         shell: pwsh
         run: |
@@ -106,15 +130,16 @@ jobs:
             Select-Object -First 1
 
           if (!$apk) {
-            throw "No APK was generated"
+            throw "No APK generated in project/artifacts/android"
           }
 
-          $output = "DARK-MYRAA.apk"
-          Copy-Item $apk.FullName $output -Force
+          New-Item -ItemType Directory -Force -Path "output" | Out-Null
 
-          "path=$output" >> $env:GITHUB_OUTPUT
+          Copy-Item $apk.FullName "output/DARK-MYRAA.apk" -Force
 
-          Write-Host "APK successfully found: $($apk.FullName)"
+          "path=output/DARK-MYRAA.apk" >> $env:GITHUB_OUTPUT
+
+          Write-Host "APK found: $($apk.FullName)"
 
       - name: Upload DARK MYRAA APK
         uses: actions/upload-artifact@v4
